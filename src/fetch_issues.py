@@ -88,6 +88,22 @@ def load_to_bigquery(rows, project, dataset, table="issues_raw"):
     job.result()
     return len(rows)
 
+def refresh_issues(project, dataset):
+    """Rebuild the clean issues table: the latest version of each issue from raw."""
+    client = bigquery.Client(project=project)
+    sql = f"""
+    CREATE OR REPLACE TABLE `{project}.{dataset}.issues` AS
+    SELECT * EXCEPT (rn)
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY id ORDER BY updated_at DESC, _loaded_at DESC
+        ) AS rn
+        FROM `{project}.{dataset}.issues_raw`
+    )
+    WHERE rn = 1
+    """
+    client.query(sql).result()
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -111,6 +127,8 @@ def main():
     rows = [to_raw_row(i, loaded_at) for i in issues]
     n = load_to_bigquery(rows, os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"])
     print(f"Loaded {n} rows into {os.environ['BQ_DATASET']}.issues_raw")
+    refresh_issues(os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"])
+    print(f"Rebuilt {os.environ['BQ_DATASET']}.issues")
 
 
 if __name__ == "__main__":
