@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
 from google.cloud import bigquery
+from google.api_core.exceptions import NotFound
 
 load_dotenv()
 
@@ -104,6 +105,16 @@ def refresh_issues(project, dataset):
     """
     client.query(sql).result()
 
+def get_cursor(project, dataset):
+    """Newest updated_at already loaded, or None if nothing is loaded yet."""
+    client = bigquery.Client(project=project)
+    sql = f"select max(updated_at) as newest from `{project}.{dataset}.issues_raw`"
+    try:
+        row = next(iter(client.query(sql).result()))
+    except NotFound:
+        return None
+    return row.newest.strftime("%Y-%m-%dT%H:%M:%SZ") if row.newest else None
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -114,7 +125,10 @@ def main():
     args = parser.parse_args()
 
     token = os.environ["GITHUB_TOKEN"]
-    issues = fetch_issues(args.repo, token, args.since, args.max_pages)
+    project, dataset = os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"]
+    since = args.since or get_cursor(project, dataset)
+    print(f"Fetching issues updated since: {since or 'the beginning'}")
+    issues = fetch_issues(args.repo, token, since, args.max_pages)
     print(f"Fetched {len(issues)} issues from {args.repo}")
     if issues:
         print(f"Oldest updated_at: {issues[0]['updated_at']}")
@@ -125,11 +139,10 @@ def main():
 
     loaded_at = datetime.now(timezone.utc).isoformat()
     rows = [to_raw_row(i, loaded_at) for i in issues]
-    n = load_to_bigquery(rows, os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"])
-    print(f"Loaded {n} rows into {os.environ['BQ_DATASET']}.issues_raw")
-    refresh_issues(os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"])
-    print(f"Rebuilt {os.environ['BQ_DATASET']}.issues")
-
+    n = load_to_bigquery(rows, project, dataset)
+    print(f"Loaded {n} rows into {dataset}.issues_raw")
+    refresh_issues(project, dataset)
+    print(f"Rebuilt {dataset}.issues")
 
 if __name__ == "__main__":
     main()
