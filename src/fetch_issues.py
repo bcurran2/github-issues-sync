@@ -50,6 +50,15 @@ def get_with_retry(url, headers, params=None, max_attempts=5):
         resp.raise_for_status()
         return resp
 
+def wait_if_rate_limited(resp):
+    """Sleep until the rate limit resets if GitHub says we've run out."""
+    remaining = resp.headers.get("X-RateLimit-Remaining")
+    if remaining is not None and int(remaining) == 0:
+        reset = int(resp.headers.get("X-RateLimit-Reset", 0))
+        wait = max(reset - int(time.time()), 0) + 1
+        print(f"Rate limit reached, sleeping {wait}s until reset")
+        time.sleep(wait)
+
 
 def fetch_issues(repo, token, since=None, max_pages=None):
     """Return all issues (not pull requests) for a repo, following pagination."""
@@ -68,6 +77,7 @@ def fetch_issues(repo, token, since=None, max_pages=None):
     while url:
         resp = get_with_retry(url, headers=headers, params=params)
         batch = resp.json()
+        wait_if_rate_limited(resp)
         # The issues endpoint also returns pull requests; keep only real issues.
         issues.extend(i for i in batch if "pull_request" not in i)
         pages += 1
