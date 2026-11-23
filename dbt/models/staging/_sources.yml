@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: github
+    database: "{{ env_var('GCP_PROJECT', 'eia-energy-pipeline') }}"
+    schema: gh_raw
+    tables:
+      - name: issues

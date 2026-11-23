@@ -1,0 +1,12 @@
+name: github_issues
+version: "1.0.0"
+profile: github_issues
+
+model-paths: ["models"]
+
+models:
+  github_issues:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

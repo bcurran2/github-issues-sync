@@ -1,0 +1,47 @@
+name: Sync GitHub issues
+
+on:
+  schedule:
+    - cron: "17 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT: eia-energy-pipeline
+      BQ_DATASET: gh_raw
+      TARGET_REPO: dbt-labs/dbt-core
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Log in to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/614666427438/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: eia-pipeline@eia-energy-pipeline.iam.gserviceaccount.com
+
+      - name: Run tests
+        run: pytest
+
+      - name: Sync issues into BigQuery
+        run: python src/fetch_issues.py
+
+      - name: Build dbt models and run tests
+        working-directory: dbt
+        run: dbt build --profiles-dir .

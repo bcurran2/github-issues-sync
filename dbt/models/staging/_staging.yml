@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_github__issues
+    columns:
+      - name: issue_id
+        data_tests:
+          - unique
+          - not_null
+      - name: state
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["open", "closed"]

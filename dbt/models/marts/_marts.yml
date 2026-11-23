@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: issues_by_month
+    columns:
+      - name: month
+        data_tests:
+          - unique
+          - not_null
