@@ -1,6 +1,7 @@
 """Fetch issues from a GitHub repository and land them in BigQuery."""
 import argparse
 import json
+import logging
 import time
 import os
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("issues_sync")
 
 API_URL = "https://api.github.com"
 
@@ -37,14 +40,15 @@ def get_with_retry(url, headers, params=None, max_attempts=5):
             resp = requests.get(url, headers=headers, params=params, timeout=30)
         except (requests.ConnectionError, requests.Timeout) as exc:
             if attempt == max_attempts:
+                logger.error("Network error (%s), giving up after %d attempts", exc.__class__.__name__, max_attempts)
                 raise
             wait = 2 ** attempt
-            print(f"Network error ({exc.__class__.__name__}), retry {attempt}/{max_attempts - 1} in {wait}s")
+            logger.warning("Network error (%s), retry %d/%d in %ds", exc.__class__.__name__, attempt, max_attempts - 1, wait)
             time.sleep(wait)
             continue
         if resp.status_code in (500, 502, 503, 504) and attempt < max_attempts:
             wait = 2 ** attempt
-            print(f"GitHub returned {resp.status_code}, retry {attempt}/{max_attempts - 1} in {wait}s")
+            logger.warning("GitHub returned %d, retry %d/%d in %ds", resp.status_code, attempt, max_attempts - 1, wait)
             time.sleep(wait)
             continue
         resp.raise_for_status()
@@ -56,7 +60,7 @@ def wait_if_rate_limited(resp):
     if remaining is not None and int(remaining) == 0:
         reset = int(resp.headers.get("X-RateLimit-Reset", 0))
         wait = max(reset - int(time.time()), 0) + 1
-        print(f"Rate limit reached, sleeping {wait}s until reset")
+        logger.warning("Rate limit reached, sleeping %ds until reset", wait)
         time.sleep(wait)
 
 
@@ -157,22 +161,27 @@ def main():
     token = os.environ["GITHUB_TOKEN"]
     project, dataset = os.environ["GCP_PROJECT"], os.environ["BQ_DATASET"]
     since = args.since or get_cursor(project, dataset)
-    print(f"Fetching issues updated since: {since or 'the beginning'}")
+    logger.info("Fetching issues updated since: %s", since or "the beginning")
     issues = fetch_issues(args.repo, token, since, args.max_pages)
-    print(f"Fetched {len(issues)} issues from {args.repo}")
+    logger.info("Fetched %d issues from %s", len(issues), args.repo)
     if issues:
-        print(f"Oldest updated_at: {issues[0]['updated_at']}")
-        print(f"Newest updated_at: {issues[-1]['updated_at']}")
+        logger.info("Oldest updated_at: %s", issues[0]["updated_at"])
+        logger.info("Newest updated_at: %s", issues[-1]["updated_at"])
 
-    if args.dry_run or not issues:
+    if args.dry_run:
+        logger.info("Dry run, nothing loaded")
+        return
+    if not issues:
+        logger.info("No new or updated issues, nothing to load")
         return
 
     loaded_at = datetime.now(timezone.utc).isoformat()
     rows = [to_raw_row(i, loaded_at) for i in issues]
     n = load_to_bigquery(rows, project, dataset)
-    print(f"Loaded {n} rows into {dataset}.issues_raw")
+    logger.info("Loaded %d rows into %s.issues_raw", n, dataset)
     refresh_issues(project, dataset)
-    print(f"Rebuilt {dataset}.issues")
+    logger.info("Rebuilt %s.issues", dataset)
+
 
 if __name__ == "__main__":
     main()
