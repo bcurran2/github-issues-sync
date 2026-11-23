@@ -1,6 +1,7 @@
 """Fetch issues from a GitHub repository and land them in BigQuery."""
 import argparse
 import json
+import time
 import os
 from datetime import datetime, timezone
 
@@ -29,6 +30,26 @@ SCHEMA = [
     bigquery.SchemaField("_loaded_at", "TIMESTAMP"),
 ]
 
+def get_with_retry(url, headers, params=None, max_attempts=5):
+    """GET with exponential backoff on network errors and 5xx responses."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt == max_attempts:
+                raise
+            wait = 2 ** attempt
+            print(f"Network error ({exc.__class__.__name__}), retry {attempt}/{max_attempts - 1} in {wait}s")
+            time.sleep(wait)
+            continue
+        if resp.status_code in (500, 502, 503, 504) and attempt < max_attempts:
+            wait = 2 ** attempt
+            print(f"GitHub returned {resp.status_code}, retry {attempt}/{max_attempts - 1} in {wait}s")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp
+
 
 def fetch_issues(repo, token, since=None, max_pages=None):
     """Return all issues (not pull requests) for a repo, following pagination."""
@@ -45,8 +66,7 @@ def fetch_issues(repo, token, since=None, max_pages=None):
     issues = []
     pages = 0
     while url:
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        resp.raise_for_status()
+        resp = get_with_retry(url, headers=headers, params=params)
         batch = resp.json()
         # The issues endpoint also returns pull requests; keep only real issues.
         issues.extend(i for i in batch if "pull_request" not in i)
