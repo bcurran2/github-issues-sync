@@ -2,7 +2,7 @@
 
 An incremental data integration: pulls issues from a public GitHub repository through the GitHub REST API and keeps a BigQuery table in sync with them. Records change over time (issues get edited, closed, relabeled), so this project is about doing that safely: only fetching what changed, never duplicating rows when a job reruns, and surviving rate limits and flaky responses.
 
-**Status:** milestones 1 to 3 done (fetch, raw load, dedupe). Working on incremental loading next.
+**Status:** milestones 1 to 5 done (fetch, raw load, dedupe, incremental loading, retries/rate limits/logging/tests). Working on the dbt model and scheduled run next.
 
 ## Why this project
 
